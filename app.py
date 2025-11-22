@@ -245,19 +245,14 @@ st.markdown(
     - **Streamlit** for interactive reporting and inference  
 
     **Business question:**  
-    > Given information about a sale (basket, customer, store, and month),  
+    > Given information about a sale (basket, customer, store, and timing),  
     > what is the probability that the customer uses a coupon?
 
     The app demonstrates:
-    - Real-time data access from Cosmos DB
-    - Handling an **imbalanced classification problem**
-    - Comparison of 5 models:
-        - Logistic Regression (sklearn)
-        - Random Forest (sklearn, lighter configuration)
-        - MLP (sklearn)
-        - LightGBM
-        - MLP (Keras, GPU-trained; comparison only)
-    - Deployment of the **best sklearn model** on a compact, interpretable feature set.
+    - Real-time data access from Cosmos DB  
+    - Handling an **imbalanced classification problem**  
+    - Comparison of 5 models  
+    - Deployment of the **best sklearn model** on a compact feature set  
     """
 )
 
@@ -266,11 +261,11 @@ tab_data, tab_imbalance, tab_models, tab_inference = st.tabs(
 )
 
 # -------------------------------------------------------------------
-# Tab 1 – Data Overview & EDA
+# Tab 1 – Data Overview & EDA (with filters & timelines)
 # -------------------------------------------------------------------
 
 with tab_data:
-    st.subheader("1. Data Overview & Exploratory Analysis")
+    st.subheader("1. Data Overview, Filters & Exploratory Analysis")
 
     try:
         df_sales = load_sales_data()
@@ -284,10 +279,10 @@ with tab_data:
     st.markdown(
         """
         Each document represents a **sale transaction** with:
-        - Items purchased (name, price, quantity)
-        - Embedded customer demographics
-        - Store location and purchase method
-        - The flag **`couponUsed`** indicating whether a coupon was applied.
+        - Items purchased (name, price, quantity)  
+        - Embedded customer demographics  
+        - Store location and purchase method  
+        - The flag **`couponUsed`** indicating whether a coupon was applied.  
         """
     )
 
@@ -296,62 +291,197 @@ with tab_data:
     try:
         df_model = build_feature_table(df_sales)
         st.write(f"Feature table rows after cleaning: **{len(df_model)}**")
-        st.dataframe(df_model.head(), use_container_width=True)
-
-        # Basic stats for numeric features
-        st.markdown("##### Descriptive statistics (numeric features)")
-        st.dataframe(df_model[["total_amount", "n_items", "n_unique_items", "cust_age"]].describe().T)
-
-        colA, colB = st.columns(2)
-
-        with colA:
-            st.markdown("##### Sales count by store location")
-            if "storeLocation" in df_model.columns:
-                vc_store = (
-                    df_model["storeLocation"]
-                    .value_counts()
-                    .rename_axis("storeLocation")
-                    .to_frame("count")
-                )
-                st.bar_chart(vc_store)
-            else:
-                st.info("Column `storeLocation` not found in feature table.")
-
-        with colB:
-            st.markdown("##### Sales count by purchase method")
-            if "purchaseMethod" in df_model.columns:
-                vc_pm = (
-                    df_model["purchaseMethod"]
-                    .value_counts()
-                    .rename_axis("purchaseMethod")
-                    .to_frame("count")
-                )
-                st.bar_chart(vc_pm)
-            else:
-                st.info("Column `purchaseMethod` not found in feature table.")
-
-        st.markdown("##### Average basket size and value by coupon usage")
-
-        if TARGET_COL in df_model.columns:
-            agg = (
-                df_model.groupby(TARGET_COL)
-                .agg(
-                    avg_total_amount=("total_amount", "mean"),
-                    avg_n_items=("n_items", "mean"),
-                    avg_n_unique_items=("n_unique_items", "mean"),
-                )
-                .rename(index={0: "No coupon", 1: "Coupon used"})
-            )
-            st.dataframe(agg)
-            st.caption(
-                "On average, we can compare how basket value and size differ "
-                "between transactions with and without coupons."
-            )
-        else:
-            st.info(f"Column `{TARGET_COL}` not found in feature table.")
-
     except Exception as e:
-        st.error(f"Error building or exploring feature table: {e}")
+        st.error(f"Error building feature table: {e}")
+        df_model = None
+
+    if df_model is None or df_model.empty:
+        st.warning("Feature table is empty; cannot perform EDA.")
+    else:
+        # ---------------- Filters ----------------
+        st.markdown("##### Filters for EDA (subset of data)")
+
+        # Prepare filter options
+        stores_all = (
+            sorted(df_model["storeLocation"].dropna().unique().tolist())
+            if "storeLocation" in df_model.columns
+            else []
+        )
+        methods_all = (
+            sorted(df_model["purchaseMethod"].dropna().unique().tolist())
+            if "purchaseMethod" in df_model.columns
+            else []
+        )
+        months_all = (
+            sorted(df_model["sale_month"].dropna().unique().tolist())
+            if "sale_month" in df_model.columns
+            else list(range(1, 13))
+        )
+
+        default_month_min = min(months_all) if months_all else 1
+        default_month_max = max(months_all) if months_all else 12
+
+        with st.expander("Open filters", expanded=True):
+            col_f1, col_f2, col_f3 = st.columns(3)
+
+            with col_f1:
+                store_filter = st.multiselect(
+                    "Store location",
+                    options=stores_all,
+                    default=stores_all,
+                    help="Filter EDA charts by selected stores.",
+                )
+
+            with col_f2:
+                method_filter = st.multiselect(
+                    "Purchase method",
+                    options=methods_all,
+                    default=methods_all,
+                    help="Filter EDA charts by selected channels.",
+                )
+
+            with col_f3:
+                month_range = st.slider(
+                    "Sale month range",
+                    min_value=int(default_month_min),
+                    max_value=int(default_month_max),
+                    value=(int(default_month_min), int(default_month_max)),
+                    step=1,
+                    help="Filter EDA charts by sale month.",
+                )
+
+        # Apply filters
+        df_filt = df_model.copy()
+
+        if store_filter and "storeLocation" in df_filt.columns:
+            df_filt = df_filt[df_filt["storeLocation"].isin(store_filter)]
+        if method_filter and "purchaseMethod" in df_filt.columns:
+            df_filt = df_filt[df_filt["purchaseMethod"].isin(method_filter)]
+        if "sale_month" in df_filt.columns and month_range:
+            df_filt = df_filt[
+                (df_filt["sale_month"] >= month_range[0])
+                & (df_filt["sale_month"] <= month_range[1])
+            ]
+
+        st.markdown(
+            f"Filtered subset: **{len(df_filt)}** rows (out of {len(df_model)} total after cleaning)."
+        )
+        st.dataframe(df_filt.head(), use_container_width=True)
+
+        if df_filt.empty:
+            st.warning("No rows match the selected filters. Adjust filters to see EDA.")
+        else:
+            # ----- Numeric stats on filtered subset -----
+            st.markdown("##### Descriptive statistics (numeric features, filtered subset)")
+            num_cols_for_desc = ["total_amount", "n_items", "n_unique_items", "cust_age"]
+            num_cols_for_desc = [c for c in num_cols_for_desc if c in df_filt.columns]
+            if num_cols_for_desc:
+                st.dataframe(df_filt[num_cols_for_desc].describe().T)
+            else:
+                st.info("No numeric columns available for statistics.")
+
+            colA, colB = st.columns(2)
+
+            with colA:
+                st.markdown("##### Sales count by store location (filtered)")
+                if "storeLocation" in df_filt.columns:
+                    vc_store = (
+                        df_filt["storeLocation"]
+                        .value_counts()
+                        .rename_axis("storeLocation")
+                        .to_frame("count")
+                    )
+                    st.bar_chart(vc_store)
+                else:
+                    st.info("Column `storeLocation` not found in feature table.")
+
+            with colB:
+                st.markdown("##### Sales count by purchase method (filtered)")
+                if "purchaseMethod" in df_filt.columns:
+                    vc_pm = (
+                        df_filt["purchaseMethod"]
+                        .value_counts()
+                        .rename_axis("purchaseMethod")
+                        .to_frame("count")
+                    )
+                    st.bar_chart(vc_pm)
+                else:
+                    st.info("Column `purchaseMethod` not found in feature table.")
+
+            st.markdown("##### Average basket size and value by coupon usage (filtered)")
+
+            if TARGET_COL in df_filt.columns:
+                agg = (
+                    df_filt.groupby(TARGET_COL)
+                    .agg(
+                        avg_total_amount=("total_amount", "mean"),
+                        avg_n_items=("n_items", "mean"),
+                        avg_n_unique_items=("n_unique_items", "mean"),
+                    )
+                    .rename(index={0: "No coupon", 1: "Coupon used"})
+                )
+                st.dataframe(agg)
+                st.caption(
+                    "These averages are computed on the filtered subset. "
+                    "They help compare basket characteristics between transactions with and without coupons."
+                )
+            else:
+                st.info(f"Column `{TARGET_COL}` not found in feature table.")
+
+            # ----- Timeline of coupon usage by month -----
+            st.markdown("##### Timeline of coupon usage by month (filtered subset)")
+
+            if {"sale_month", TARGET_COL}.issubset(df_filt.columns):
+                month_agg = (
+                    df_filt.groupby("sale_month")[TARGET_COL]
+                    .agg(coupon_rate="mean", n_sales="count")
+                    .reset_index()
+                )
+                # Simple line chart of coupon rate
+                month_agg_display = month_agg.set_index("sale_month")[["coupon_rate"]]
+                st.line_chart(month_agg_display)
+                st.caption(
+                    "Coupon rate = average of `couponUsed` per month, on the filtered subset."
+                )
+            else:
+                st.info("Cannot compute monthly timeline; missing `sale_month` or target.")
+
+            # ----- Timeline by month and store -----
+            st.markdown("##### Coupon usage by month and store (coupon rate)")
+
+            if {"sale_month", "storeLocation", TARGET_COL}.issubset(df_filt.columns):
+                # Group by month and store, then pivot to wide format for multi-line chart
+                store_month_agg = (
+                    df_filt.groupby(["sale_month", "storeLocation"])[TARGET_COL]
+                    .mean()
+                    .reset_index()
+                )
+                pivot_store_month = store_month_agg.pivot(
+                    index="sale_month",
+                    columns="storeLocation",
+                    values=TARGET_COL,
+                )
+                # For readability, limit to a reasonable number of stores
+                if pivot_store_month.shape[1] > 10:
+                    top_stores = (
+                        df_filt.groupby("storeLocation")[TARGET_COL]
+                        .count()
+                        .sort_values(ascending=False)
+                        .head(10)
+                        .index
+                        .tolist()
+                    )
+                    pivot_store_month = pivot_store_month[top_stores]
+
+                st.line_chart(pivot_store_month)
+                st.caption(
+                    "Each line shows the coupon usage rate per month for a store "
+                    "in the filtered subset. If many stores exist, only the top few by volume are shown."
+                )
+            else:
+                st.info(
+                    "Cannot compute monthly timeline by store; missing `sale_month`, `storeLocation`, or target."
+                )
 
 # -------------------------------------------------------------------
 # Tab 2 – Target Balance
@@ -376,9 +506,9 @@ with tab_imbalance:
             - The minority class corresponds to **sales where a coupon was used**
 
             During training, this imbalance was addressed via:
-            - `class_weight="balanced"` in all sklearn models
+            - `class_weight="balanced"` in all sklearn models  
             - Per-model **threshold tuning** on the validation set, focusing on
-              better F1-score for the coupon (positive) class.
+              better F1-score for the coupon (positive) class.  
             """
         )
     else:
