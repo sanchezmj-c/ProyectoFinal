@@ -1,72 +1,84 @@
 {
   "baseline": [
     {
-      "model": "Logistic Regression",
-      "kind": "sklearn",
-      "accuracy": 0.516,
-      "roc_auc": 0.5257292690921009,
-      "precision": 0.10136986301369863,
-      "recall": 0.5138888888888888,
-      "f1": 0.16933638443935928,
-      "train_time_sec": 1.2469727993011475,
-      "resource": "CPU \u2013 low",
-      "threshold": 0.5
+      "Model": "Logistic Regression (reduced features)",
+      "Kind": "sklearn",
+      "Accuracy": 0.5186666666666667,
+      "ROC_AUC": 0.5159578826614224,
+      "Precision": 0.10410958904109589,
+      "Recall": 0.5277777777777778,
+      "F1": 0.17391304347826086,
+      "Train_Time_s": 1.5152192115783691,
+      "Resource": "CPU \u2013 low",
+      "Threshold": 0.5
     },
     {
-      "model": "Random Forest",
-      "kind": "sklearn",
-      "accuracy": 0.904,
-      "roc_auc": 0.44920722713864314,
-      "precision": 0.0,
-      "recall": 0.0,
-      "f1": 0.0,
-      "train_time_sec": 0.35026025772094727,
-      "resource": "CPU \u2013 medium",
-      "threshold": 0.5
+      "Model": "Random Forest (reduced features, lighter)",
+      "Kind": "sklearn",
+      "Accuracy": 0.9,
+      "ROC_AUC": 0.539167486070141,
+      "Precision": 0.0,
+      "Recall": 0.0,
+      "F1": 0.0,
+      "Train_Time_s": 0.2708418369293213,
+      "Resource": "CPU \u2013 medium",
+      "Threshold": 0.5
     },
     {
-      "model": "Neural Network (MLP - sklearn)",
-      "kind": "sklearn",
-      "accuracy": 0.8733333333333333,
-      "roc_auc": 0.4732259914782039,
-      "precision": 0.12903225806451613,
-      "recall": 0.05555555555555555,
-      "f1": 0.07766990291262135,
-      "train_time_sec": 2.3373138904571533,
-      "resource": "CPU \u2013 medium/high",
-      "threshold": 0.5
+      "Model": "MLP (sklearn, reduced features)",
+      "Kind": "sklearn",
+      "Accuracy": 0.848,
+      "ROC_AUC": 0.4813176007866274,
+      "Precision": 0.08,
+      "Recall": 0.05555555555555555,
+      "F1": 0.06557377049180328,
+      "Train_Time_s": 5.666176080703735,
+      "Resource": "CPU \u2013 medium/high",
+      "Threshold": 0.5
     },
     {
-      "model": "Neural Network (MLP - Keras)",
-      "kind": "keras",
-      "accuracy": 0.904,
-      "roc_auc": 0.5381637168141593,
-      "precision": 0.0,
-      "recall": 0.0,
-      "f1": 0.0,
-      "train_time_sec": 3.3656771183013916,
-      "resource": "GPU \u2013 high (TensorFlow / Metal)",
-      "threshold": 0.5
+      "Model": "LightGBM (reduced features)",
+      "Kind": "sklearn",
+      "Accuracy": 0.812,
+      "ROC_AUC": 0.5192969518190758,
+      "Precision": 0.07407407407407407,
+      "Recall": 0.08333333333333333,
+      "F1": 0.0784313725490196,
+      "Train_Time_s": 1.5522940158843994,
+      "Resource": "CPU \u2013 medium (fast, compact)",
+      "Threshold": 0.5
+    },
+    {
+      "Model": "MLP (Keras, reduced features)",
+      "Kind": "keras",
+      "Accuracy": 0.904,
+      "ROC_AUC": 0.5473205506391348,
+      "Precision": 0.0,
+      "Recall": 0.0,
+      "F1": 0.0,
+      "Train_Time_s": 4.589103937149048,
+      "Resource": "GPU \u2013 high (local TF/Metal)",
+      "Threshold": 0.5
     }
   ],
   "improved_best_sklearn": {
-    "model": "Logistic Regression",
+    "model": "Logistic Regression (reduced features)",
     "kind": "sklearn",
     "baseline": {
       "threshold": 0.5,
-      "accuracy": 0.5293333333333333,
-      "roc_auc": 0.559857423795477,
-      "precision": 0.10863509749303621,
-      "recall": 0.5416666666666666,
-      "f1": 0.18097447795823665
+      "accuracy": 0.5186666666666667,
+      "roc_auc": 0.5159578826614224,
+      "precision": 0.10410958904109589,
+      "recall": 0.5277777777777778,
+      "f1": 0.17391304347826086
     },
     "improved": {
       "threshold": 0.4,
-      "accuracy": 0.12,
-      "roc_auc": 0.559857423795477,
-      "precision": 0.09726027397260274,
-      "recall": 0.9861111111111112,
-      "f1": 0.1770573566084788
+      "accuracy": 0.09733333333333333,
+      "roc_auc": 0.5019187288680537,
+      "precision": 0.0938337801608579,
+      "recall": 0.9859154929577465,
+      "f1": 0.17135862913096694
     }
   }
 }
