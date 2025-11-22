@@ -176,7 +176,8 @@ def load_model_results():
       - MLP (sklearn)
       - LightGBM
       - MLP (Keras)
-    All trained on the reduced feature set.
+    All trained on the reduced feature set, each evaluated at its own
+    best validation threshold (F1-optimized).
     """
     if not os.path.exists(RESULTS_PATH):
         return None
@@ -255,7 +256,7 @@ st.markdown(
         - Random Forest (sklearn, lighter configuration)
         - MLP (sklearn)
         - LightGBM
-        - MLP (Keras, GPU-trained)
+        - MLP (Keras, GPU-trained; comparison only)
     - Deployment of the **best sklearn model** on a compact, interpretable feature set.
     """
 )
@@ -376,8 +377,8 @@ with tab_imbalance:
 
             During training, this imbalance was addressed via:
             - `class_weight="balanced"` in all sklearn models
-            - A **tuned decision threshold** for the deployed model,
-              focusing on a better balance of precision and recall for coupon users.
+            - Per-model **threshold tuning** on the validation set, focusing on
+              better F1-score for the coupon (positive) class.
             """
         )
     else:
@@ -390,23 +391,24 @@ with tab_imbalance:
 with tab_models:
     st.subheader("3. Model Performance – Validation & Test Results")
 
-    results = load_model_results()
-    if results is None:
+    results_json = load_model_results()
+    if results_json is None:
         st.error("`model_results.json` not found. Please commit the `models/` folder from the retraining notebook.")
     else:
-        baseline = pd.DataFrame(results.get("baseline", []))
-        improved = results.get("improved_best_sklearn", None)
+        baseline = pd.DataFrame(results_json.get("baseline", []))
+        improved = results_json.get("improved_best_sklearn", None)
 
-        st.markdown("### 3.1 Comparison of Models (Validation Set, Threshold = 0.5)")
+        st.markdown("### 3.1 Comparison of Models (Validation Set, Best Threshold per Model)")
         st.write(
             """
-            The table below summarizes **validation-set performance** (threshold = 0.5)
-            for the 5 candidate models, all trained on the **reduced feature set**:
-            - Logistic Regression
-            - Random Forest (lighter configuration)
-            - MLP (sklearn)
-            - LightGBM
-            - MLP (Keras, trained locally with GPU)
+            The table below summarizes **validation-set performance** for the 5 candidate models,
+            each evaluated at its **own best threshold** (selected to maximize F1 on the validation set):
+
+            - Logistic Regression (sklearn)  
+            - Random Forest (sklearn, lighter configuration)  
+            - MLP (sklearn)  
+            - LightGBM  
+            - MLP (Keras, trained locally with GPU – comparison only)  
             """
         )
         st.dataframe(baseline, use_container_width=True)
@@ -416,10 +418,10 @@ with tab_models:
         if improved is not None:
             col1, col2 = st.columns(2)
             with col1:
-                st.markdown("**Baseline configuration (validation, threshold = 0.5)**")
+                st.markdown("**Validation metrics (at model's best threshold)**")
                 st.json(improved["baseline"])
             with col2:
-                st.markdown("**Improved configuration (test, tuned threshold)**")
+                st.markdown("**Test metrics (same threshold, unseen data)**")
                 st.json(improved["improved"])
 
             st.markdown(
@@ -427,20 +429,21 @@ with tab_models:
                 The deployed model is the **best sklearn model on the reduced feature set**:
                 **{improved['model']}**.
 
-                A compact set of features was used for modeling:
-                - Basket size and value
-                - Customer age and gender
-                - Store location and purchase channel
-                - Month of the sale
+                For this model:
+                - The validation-set threshold was tuned to maximize F1 for coupon usage.  
+                - The same threshold was then applied to the test set to measure **generalization**.  
 
-                A custom **decision threshold** was tuned on the validation set to improve the
-                trade-off between recall and precision for coupon users, and then evaluated on the test set.
+                All models share the same input features:
+                - Basket size and value  
+                - Customer age and gender  
+                - Store location and purchase channel  
+                - Month of the sale  
                 """
             )
         else:
             st.info("Improved metrics for the best sklearn model were not found in `model_results.json`.")
 
-        # Confusion matrices on current Cosmos DB data (optional, for deployed model)
+        # Confusion matrices on current Cosmos DB data (for deployed model)
         st.markdown("### 3.3 Confusion Matrices on Current Cosmos Data (Deployed Model)")
 
         try:
@@ -452,33 +455,41 @@ with tab_models:
             else:
                 y_prob_all = pipeline.predict_proba(X_all)[:, 1]
 
-                # Baseline threshold 0.5
+                # Baseline threshold 0.5 (reference)
                 acc_05, auc_05, prec_05, rec_05, f1_05, cm_05 = compute_metrics(
                     y_all, y_prob_all, 0.5
                 )
-                # Tuned threshold
+                # Tuned threshold from training
                 acc_t, auc_t, prec_t, rec_t, f1_t, cm_t = compute_metrics(
                     y_all, y_prob_all, best_threshold
                 )
 
                 colA, colB = st.columns(2)
                 with colA:
-                    st.markdown("**Baseline threshold = 0.5**")
+                    st.markdown("**Reference threshold = 0.5**")
                     df_cm_05 = pd.DataFrame(
                         cm_05,
                         index=["True 0 (no coupon)", "True 1 (coupon)"],
                         columns=["Pred 0", "Pred 1"],
                     )
                     st.table(df_cm_05)
+                    st.caption(
+                        f"Accuracy={acc_05:.3f}, Precision={prec_05:.3f}, "
+                        f"Recall={rec_05:.3f}, F1={f1_05:.3f}"
+                    )
 
                 with colB:
-                    st.markdown(f"**Tuned threshold = {best_threshold:.2f}**")
+                    st.markdown(f"**Deployed threshold = {best_threshold:.2f}**")
                     df_cm_t = pd.DataFrame(
                         cm_t,
                         index=["True 0 (no coupon)", "True 1 (coupon)"],
                         columns=["Pred 0", "Pred 1"],
                     )
                     st.table(df_cm_t)
+                    st.caption(
+                        f"Accuracy={acc_t:.3f}, Precision={prec_t:.3f}, "
+                        f"Recall={rec_t:.3f}, F1={f1_t:.3f}"
+                    )
 
                 st.caption(
                     f"Confusion matrices computed on {len(y_all)} labeled rows with valid features "
@@ -637,21 +648,21 @@ with tab_inference:
         cust_gender = st.selectbox("Customer gender", genders)
 
         st.markdown("**Basket details**")
-        total_amount = st.number_input(
+        total_amount_val = st.number_input(
             "Total basket amount",
             min_value=float(amt_min),
             max_value=float(amt_max),
             value=float(amt_med),
             step=10.0,
         )
-        n_items = st.number_input(
+        n_items_val = st.number_input(
             "Total quantity of items",
             min_value=int(items_min),
             max_value=int(items_max),
             value=int(items_med),
             step=1,
         )
-        n_unique_items = st.number_input(
+        n_unique_items_val = st.number_input(
             "Number of different items",
             min_value=int(uniq_min),
             max_value=int(uniq_max),
@@ -677,9 +688,9 @@ with tab_inference:
         try:
             # Construct single-row DataFrame with exactly SELECTED_FEATURES
             single_row = pd.DataFrame([{
-                "total_amount": float(total_amount),
-                "n_items": int(n_items),
-                "n_unique_items": int(n_unique_items),
+                "total_amount": float(total_amount_val),
+                "n_items": int(n_items_val),
+                "n_unique_items": int(n_unique_items_val),
                 "cust_age": float(cust_age),
                 "cust_gender": cust_gender,
                 "storeLocation": store_location,
@@ -701,7 +712,7 @@ with tab_inference:
 
             st.caption(
                 "This prediction uses the same trained pipeline as in the model evaluation. "
-                "Training and tuning were done offline; this app only performs inference."
+                "Training and threshold tuning were done offline; this app only performs inference."
             )
         except Exception as e:
             st.error(f"Error computing manual prediction: {e}")
