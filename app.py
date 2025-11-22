@@ -31,7 +31,7 @@ RESULTS_PATH = "models/model_results.json"
 
 TARGET_COL = "couponUsed"
 
-# Features used by the deployed model (kept, but we avoid showing these names to users)
+# Features used by the deployed model (internal names)
 SELECTED_FEATURES = [
     "total_amount",
     "n_items",
@@ -98,13 +98,6 @@ def build_feature_table(df_raw: pd.DataFrame) -> pd.DataFrame:
     """
     Transform raw Cosmos 'sales' documents into the flat feature table
     used by the deployed model.
-
-    Internal feature names:
-      - total_amount, n_items, n_unique_items
-      - cust_age, cust_gender
-      - storeLocation, purchaseMethod
-      - sale_month
-      - couponUsed (target)
     """
     df = df_raw.copy()
 
@@ -219,30 +212,45 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Global style: slightly larger text for presentation
+# Global style: bigger fonts + white background
 st.markdown(
     """
     <style>
-    html, body, [class*="css"]  {
-        font-size: 18px;
+    /* Force white background and dark text */
+    html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"], [data-testid="stSidebar"] {
+        background-color: #FFFFFF !important;
+        color: #111111 !important;
     }
     .block-container {
         padding-top: 1rem;
         padding-bottom: 1rem;
-        max-width: 1400px;
+        max-width: 1500px;
         margin: 0 auto;
     }
+    /* Base font sizes */
+    html, body, [class*="css"]  {
+        font-size: 20px;
+    }
     h1 {
-        font-size: 2.6rem !important;
+        font-size: 2.8rem !important;
         font-weight: 700 !important;
     }
     h2 {
-        font-size: 2.0rem !important;
-        font-weight: 600 !important;
+        font-size: 2.2rem !important;
+        font-weight: 650 !important;
     }
     h3 {
-        font-size: 1.6rem !important;
+        font-size: 1.8rem !important;
         font-weight: 600 !important;
+    }
+    /* Metric cards a bit bigger */
+    div[data-testid="stMetricValue"] {
+        font-size: 1.8rem !important;
+        font-weight: 700 !important;
+    }
+    div[data-testid="stMetricLabel"] {
+        font-size: 1.0rem !important;
+        font-weight: 500 !important;
     }
     </style>
     """,
@@ -253,9 +261,9 @@ st.title("Coupon Usage Prediction – Retail Insights Dashboard")
 
 st.markdown(
     """
-    This dashboard brings together **Azure Cosmos DB**, **machine learning models**, and a
-    user-friendly interface to help retail stakeholders understand **how and where coupons
-    are being used**, and to estimate the **likelihood of coupon usage** for new sales.
+    This dashboard combines **Azure Cosmos DB**, **machine learning models**, and a simple interface
+    to help understand **where coupons are used** and to estimate the **probability of coupon usage**
+    for future transactions.
     """
 )
 
@@ -283,7 +291,7 @@ with tab_overview:
         st.error(f"Error loading or processing data from Cosmos DB: {e}")
         st.stop()
 
-    # KPIs (friendly labels)
+    # KPIs
     n_tx = len(df_model)
     overall_coupon_rate = df_model[TARGET_COL].mean() if n_tx > 0 else 0.0
     n_stores = df_model["storeLocation"].nunique() if "storeLocation" in df_model.columns else 0
@@ -291,11 +299,11 @@ with tab_overview:
 
     k1, k2, k3, k4 = st.columns(4)
     with k1:
-        st.metric("Total Transactions (model-ready)", f"{n_tx:,}")
+        st.metric("Model-ready Transactions", f"{n_tx:,}")
     with k2:
         st.metric("Overall Coupon Usage Rate", f"{overall_coupon_rate*100:,.1f}%")
     with k3:
-        st.metric("Active Stores in Dataset", f"{n_stores}")
+        st.metric("Stores in Dataset", f"{n_stores}")
     with k4:
         st.metric("Average Basket Value", f"${avg_basket:,.2f}")
 
@@ -309,7 +317,6 @@ with tab_overview:
             .agg(Coupon_Usage_Rate="mean", Number_of_Transactions="count")
             .reset_index()
         )
-        # For chart: index = month, column renamed to human label
         month_chart = month_agg.set_index("sale_month")[["Coupon_Usage_Rate"]]
         st.line_chart(month_chart)
         st.caption(
@@ -327,7 +334,6 @@ with tab_overview:
             .agg(Coupon_Usage_Rate="mean", Number_of_Transactions="count")
             .reset_index()
         )
-        # Focus on top stores by volume
         store_agg = store_agg.sort_values("Number_of_Transactions", ascending=False).head(10)
         store_chart = store_agg.set_index("storeLocation")[["Coupon_Usage_Rate"]]
         st.bar_chart(store_chart)
@@ -338,15 +344,14 @@ with tab_overview:
     else:
         st.info("Cannot compute store view – missing location or target fields.")
 
-    st.subheader("Key Insights (High-Level)")
+    st.subheader("Key Takeaways")
     st.markdown(
         """
-        - **Overall usage:** The coupon usage rate provides a baseline for how often customers
+        - **Overall usage:** The coupon usage rate gives a baseline for how often customers
           take advantage of promotions.
-        - **Seasonality:** The month-by-month view helps identify **campaign windows** where
-          coupons have stronger impact.
-        - **Geographical behavior:** Differences between stores hint at **local behavior** and
-          opportunities for regional targeting.
+        - **Seasonality:** The month-by-month view highlights potential **campaign windows**.
+        - **Store differences:** Variation between stores suggests where targeted discount
+          strategies might be most effective.
         """
     )
 
@@ -470,7 +475,9 @@ with tab_data:
                         "max": "Max",
                     }
                 )
-                st.dataframe(desc[["Feature", "Mean", "Std Dev", "min", "max"]])
+                # Only show columns that exist (fixes KeyError)
+                cols_to_show = [c for c in ["Feature", "Mean", "Std Dev", "Min", "Max"] if c in desc.columns]
+                st.dataframe(desc[cols_to_show])
             else:
                 st.info("No numeric columns available for summary statistics.")
 
@@ -523,7 +530,7 @@ with tab_data:
                         "avg_n_unique_items": "Average Number of Distinct Products",
                     }
                 )
-                st.dataframe(agg.set_index("CouponUsage"))
+                st.dataframe(agg.set_index("CouponUsedFlag") if "CouponUsedFlag" in agg.columns else agg)
                 st.caption(
                     "Comparison of basket characteristics for transactions with and without coupon usage."
                 )
@@ -554,7 +561,6 @@ with tab_data:
                     columns="storeLocation",
                     values=TARGET_COL,
                 )
-                # Limit to top stores if too many columns
                 if pivot_store_month.shape[1] > 10:
                     top_stores = (
                         df_filt.groupby("storeLocation")[TARGET_COL]
@@ -629,8 +635,8 @@ with tab_models:
         st.subheader("4.1 Validation Results (Each Model at Its Best Threshold)")
         st.markdown(
             """
-            The table below shows validation-set performance for each candidate model.
-            Each model is evaluated at the threshold that maximizes its F1-score for coupon usage.
+            Each candidate model is evaluated on the validation set at the threshold that maximizes
+            its F1-score for the coupon usage class.
             """
         )
         st.dataframe(baseline, use_container_width=True)
@@ -707,14 +713,14 @@ with tab_inference:
 
     st.markdown(
         """
-        The deployed model uses the following information about a sale:
+        The deployed model uses:
         - Basket value and size (total amount, number of items, number of distinct products)
         - Customer age and gender
         - Store location
         - Sales channel (in-store, online, phone)
         - Month of the sale
 
-        It outputs **the probability that a coupon is used** for that transaction.
+        to estimate the **probability that a coupon is used** for a transaction.
         """
     )
 
