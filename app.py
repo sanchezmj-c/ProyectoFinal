@@ -39,6 +39,7 @@ def load_cosmos_client():
     client = CosmosClient(COSMOS_URL, credential=COSMOS_KEY)
     return client
 
+
 @st.cache_data(show_spinner=True)
 def load_sales_data():
     client = load_cosmos_client()
@@ -48,15 +49,18 @@ def load_sales_data():
     df = pd.DataFrame(items)
     return df
 
+
 def total_amount(items):
     if not isinstance(items, list):
         return np.nan
     return sum((it.get("price", 0) * it.get("quantity", 1)) for it in items)
 
+
 def total_quantity(items):
     if not isinstance(items, list):
         return np.nan
     return sum(it.get("quantity", 1) for it in items)
+
 
 def n_unique_items(items):
     if not isinstance(items, list):
@@ -64,12 +68,18 @@ def n_unique_items(items):
     names = [it.get("name") for it in items if isinstance(it, dict) and "name" in it]
     return len(set(names))
 
+
 def get_customer_field(c, field):
     if not isinstance(c, dict):
         return np.nan
     return c.get(field)
 
+
 def build_feature_table(df_raw: pd.DataFrame) -> pd.DataFrame:
+    """
+    Same logic as in the notebook: build a flat feature table from the Cosmos sales docs.
+    If couponUsed is missing, keep it as NaN (so we can still use rows just for prediction).
+    """
     df = df_raw.copy()
 
     if "couponUsed" not in df.columns:
@@ -105,6 +115,7 @@ def build_feature_table(df_raw: pd.DataFrame) -> pd.DataFrame:
     df_model = df[feature_cols].copy()
     return df_model
 
+
 @st.cache_resource(show_spinner=True)
 def load_model_and_threshold():
     if not os.path.exists(MODEL_PATH):
@@ -117,12 +128,14 @@ def load_model_and_threshold():
     best_threshold = float(data.get("best_threshold", 0.5))
     return pipeline, best_threshold
 
+
 @st.cache_data(show_spinner=True)
 def load_model_results():
     if not os.path.exists(RESULTS_PATH):
         return None
     with open(RESULTS_PATH, "r") as f:
         return json.load(f)
+
 
 def compute_metrics(y_true, y_prob, threshold):
     y_pred = (y_prob >= threshold).astype(int)
@@ -162,7 +175,10 @@ tab_data, tab_imbalance, tab_models, tab_inference = st.tabs(
     ["Data & EDA", "Class Imbalance", "Models & Results", "Deployed Model Inference"]
 )
 
-# Tab 1 – Data
+# -----------------------------
+# Tab 1 – Data & EDA
+# -----------------------------
+
 with tab_data:
     st.subheader("1. Data from Cosmos DB")
     try:
@@ -180,9 +196,13 @@ with tab_data:
         """
     )
 
-# Tab 2 – Imbalance
+# -----------------------------
+# Tab 2 – Class imbalance
+# -----------------------------
+
 with tab_imbalance:
     st.subheader("2. Target Variable – Class Imbalance")
+
     df_sales = load_sales_data()
 
     if "couponUsed" in df_sales.columns:
@@ -201,9 +221,13 @@ with tab_imbalance:
     else:
         st.warning("Column `couponUsed` not found; cannot show imbalance properly.")
 
+# -----------------------------
 # Tab 3 – Models & results
+# -----------------------------
+
 with tab_models:
     st.subheader("3. Models Used and Results (Baseline vs Improved)")
+
     results = load_model_results()
     if results is None:
         st.error("model_results.json not found. Commit the models/ folder from the notebook.")
@@ -245,7 +269,10 @@ with tab_models:
         else:
             st.info("Improved metrics for best sklearn model not found in model_results.json.")
 
-# Tab 4 – Inference
+# -----------------------------
+# Tab 4 – Inference with deployed pipeline
+# -----------------------------
+
 with tab_inference:
     st.subheader("4. Inference with Deployed scikit-learn Pipeline")
 
@@ -256,53 +283,87 @@ with tab_inference:
         st.error(f"Error loading model or threshold: {e}")
         st.stop()
 
+    # Load and transform data
     df_sales = load_sales_data()
     df_model = build_feature_table(df_sales)
+
+    # Clean inf values -> NaN
+    df_model.replace([np.inf, -np.inf], np.nan, inplace=True)
 
     st.write("Feature table preview (after transformation):")
     st.dataframe(df_model.head(), use_container_width=True)
 
     if "couponUsed" in df_model.columns:
-        df_valid = df_model.dropna(subset=["couponUsed"]).copy()
-        X_all = df_valid.drop(columns=["couponUsed"])
-        y_all = df_valid["couponUsed"].astype(int).values
+        # Drop rows with NaNs in feature columns (but keep couponUsed for evaluation)
+        feature_cols = [c for c in df_model.columns if c != "couponUsed"]
+        df_valid = df_model.dropna(subset=feature_cols).copy()
 
-        y_prob_all = pipeline.predict_proba(X_all)[:, 1]
+        if df_valid.empty:
+            st.warning("No rows left after dropping NaNs in feature columns. Cannot run inference.")
+            st.stop()
 
-        thr = st.slider(
-            "Decision threshold for classifying coupon usage",
-            min_value=0.1,
-            max_value=0.9,
-            value=float(best_threshold_file),
-            step=0.05,
+        # Some rows may have couponUsed as NaN (unlabeled) – drop them for metrics
+        df_valid_labeled = df_valid.dropna(subset=["couponUsed"]).copy()
+        df_valid_unlabeled = df_valid[df_valid["couponUsed"].isna()].copy()
+
+        if not df_valid_labeled.empty:
+            X_all = df_valid_labeled.drop(columns=["couponUsed"])
+            y_all = df_valid_labeled["couponUsed"].astype(int).values
+
+            y_prob_all = pipeline.predict_proba(X_all)[:, 1]
+
+            thr = st.slider(
+                "Decision threshold for classifying coupon usage",
+                min_value=0.1,
+                max_value=0.9,
+                value=float(best_threshold_file),
+                step=0.05,
+            )
+
+            acc, auc, prec, rec, f1, cm = compute_metrics(y_all, y_prob_all, thr)
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Accuracy", f"{acc:.3f}")
+                st.metric("ROC-AUC", f"{auc:.3f}" if not np.isnan(auc) else "N/A")
+            with col2:
+                st.metric("Precision (class 1)", f"{prec:.3f}")
+                st.metric("Recall (class 1)", f"{rec:.3f}")
+            with col3:
+                st.metric("F1-score (class 1)", f"{f1:.3f}")
+
+            st.write("Confusion matrix (rows=true, cols=predicted):")
+            st.write(cm)
+        else:
+            st.info(
+                "No labeled rows with valid features to compute metrics. "
+                "Showing only predicted probabilities for all valid rows."
+            )
+            X_all = df_valid.drop(columns=["couponUsed"])
+            y_prob_all = pipeline.predict_proba(X_all)[:, 1]
+            st.write("Sample predicted probabilities:")
+            st.write(y_prob_all[:20])
+
+        # Show info about dropped rows
+        n_total = len(df_model)
+        n_valid_feat = len(df_valid)
+        st.caption(
+            f"Rows with valid features used for inference: {n_valid_feat} "
+            f"/ {n_total} (dropped {n_total - n_valid_feat} rows with NaNs or infs in features)."
         )
-
-        acc, auc, prec, rec, f1, cm = compute_metrics(y_all, y_prob_all, thr)
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Accuracy", f"{acc:.3f}")
-            st.metric("ROC-AUC", f"{auc:.3f}" if not np.isnan(auc) else "N/A")
-        with col2:
-            st.metric("Precision (class 1)", f"{prec:.3f}")
-            st.metric("Recall (class 1)", f"{rec:.3f}")
-        with col3:
-            st.metric("F1-score (class 1)", f"{f1:.3f}")
-
-        st.write("Confusion matrix (rows=true, cols=predicted):")
-        st.write(cm)
 
         st.markdown(
             """
             **Deployment summary:**
             - All heavy training and threshold tuning was done offline in a Jupyter notebook.
             - Only the final sklearn pipeline and tuned threshold are used here for inference.
-            - This keeps the Streamlit app lightweight and runnable on Streamlit Cloud.
+            - Rows with invalid or missing feature values are safely dropped before prediction.
             """
         )
     else:
         st.info("No true `couponUsed` labels available; only showing predicted probabilities.")
-        X_all = df_model.copy()
+        df_model_clean = df_model.replace([np.inf, -np.inf], np.nan).dropna()
+        X_all = df_model_clean.copy()
         y_prob_all = pipeline.predict_proba(X_all)[:, 1]
         st.write("Sample predicted probabilities:")
         st.write(y_prob_all[:20])
