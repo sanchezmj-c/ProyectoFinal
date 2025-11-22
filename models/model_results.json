@@ -3,82 +3,82 @@
     {
       "Model": "Logistic Regression (reduced features)",
       "Kind": "sklearn",
-      "Accuracy": 0.5186666666666667,
+      "Best_Threshold": 0.4,
+      "Accuracy": 0.112,
       "ROC_AUC": 0.5159578826614224,
-      "Precision": 0.10410958904109589,
-      "Recall": 0.5277777777777778,
-      "F1": 0.17391304347826086,
-      "Train_Time_s": 1.5152192115783691,
-      "Resource": "CPU \u2013 low",
-      "Threshold": 0.5
+      "Precision": 0.0975609756097561,
+      "Recall": 1.0,
+      "F1": 0.17777777777777778,
+      "Train_Time_s": 1.178995132446289,
+      "Resource": "CPU \u2013 low"
     },
     {
       "Model": "Random Forest (reduced features, lighter)",
       "Kind": "sklearn",
-      "Accuracy": 0.9,
+      "Best_Threshold": 0.2,
+      "Accuracy": 0.412,
       "ROC_AUC": 0.539167486070141,
-      "Precision": 0.0,
-      "Recall": 0.0,
-      "F1": 0.0,
-      "Train_Time_s": 0.2708418369293213,
-      "Resource": "CPU \u2013 medium",
-      "Threshold": 0.5
+      "Precision": 0.10828025477707007,
+      "Recall": 0.7083333333333334,
+      "F1": 0.1878453038674033,
+      "Train_Time_s": 0.24307990074157715,
+      "Resource": "CPU \u2013 medium"
     },
     {
       "Model": "MLP (sklearn, reduced features)",
       "Kind": "sklearn",
-      "Accuracy": 0.848,
+      "Best_Threshold": 0.1,
+      "Accuracy": 0.776,
       "ROC_AUC": 0.4813176007866274,
-      "Precision": 0.08,
-      "Recall": 0.05555555555555555,
-      "F1": 0.06557377049180328,
-      "Train_Time_s": 5.666176080703735,
-      "Resource": "CPU \u2013 medium/high",
-      "Threshold": 0.5
+      "Precision": 0.08620689655172414,
+      "Recall": 0.1388888888888889,
+      "F1": 0.10638297872340426,
+      "Train_Time_s": 2.348047971725464,
+      "Resource": "CPU \u2013 medium/high"
     },
     {
       "Model": "LightGBM (reduced features)",
       "Kind": "sklearn",
-      "Accuracy": 0.812,
+      "Best_Threshold": 0.30000000000000004,
+      "Accuracy": 0.6733333333333333,
       "ROC_AUC": 0.5192969518190758,
-      "Precision": 0.07407407407407407,
-      "Recall": 0.08333333333333333,
-      "F1": 0.0784313725490196,
-      "Train_Time_s": 1.5522940158843994,
-      "Resource": "CPU \u2013 medium (fast, compact)",
-      "Threshold": 0.5
+      "Precision": 0.11555555555555555,
+      "Recall": 0.3611111111111111,
+      "F1": 0.1750841750841751,
+      "Train_Time_s": 1.222611904144287,
+      "Resource": "CPU \u2013 medium (fast, compact)"
     },
     {
       "Model": "MLP (Keras, reduced features)",
       "Kind": "keras",
-      "Accuracy": 0.904,
-      "ROC_AUC": 0.5473205506391348,
-      "Precision": 0.0,
-      "Recall": 0.0,
-      "F1": 0.0,
-      "Train_Time_s": 4.589103937149048,
-      "Resource": "GPU \u2013 high (local TF/Metal)",
-      "Threshold": 0.5
+      "Best_Threshold": 0.1,
+      "Accuracy": 0.756,
+      "ROC_AUC": 0.5234963946247132,
+      "Precision": 0.07633587786259542,
+      "Recall": 0.1388888888888889,
+      "F1": 0.09852216748768473,
+      "Train_Time_s": 4.757354021072388,
+      "Resource": "GPU \u2013 high (local TF/Metal)"
     }
   ],
   "improved_best_sklearn": {
-    "model": "Logistic Regression (reduced features)",
+    "model": "Random Forest (reduced features, lighter)",
     "kind": "sklearn",
     "baseline": {
-      "threshold": 0.5,
-      "accuracy": 0.5186666666666667,
-      "roc_auc": 0.5159578826614224,
-      "precision": 0.10410958904109589,
-      "recall": 0.5277777777777778,
-      "f1": 0.17391304347826086
+      "threshold": 0.2,
+      "accuracy": 0.412,
+      "roc_auc": 0.539167486070141,
+      "precision": 0.10828025477707007,
+      "recall": 0.7083333333333334,
+      "f1": 0.1878453038674033
     },
     "improved": {
-      "threshold": 0.4,
-      "accuracy": 0.09733333333333333,
-      "roc_auc": 0.5019187288680537,
-      "precision": 0.0938337801608579,
-      "recall": 0.9859154929577465,
-      "f1": 0.17135862913096694
+      "threshold": 0.2,
+      "accuracy": 0.31066666666666665,
+      "roc_auc": 0.4590014312680205,
+      "precision": 0.09306569343065693,
+      "recall": 0.7183098591549296,
+      "f1": 0.16478190630048464
     }
   }
 }
