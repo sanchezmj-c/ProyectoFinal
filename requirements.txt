@@ -1,0 +1,6 @@
+streamlit
+pandas
+numpy
+azure-cosmos
+scikit-learn
+joblib
