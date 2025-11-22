@@ -1,5 +1,6 @@
 import os
 import json
+
 from datetime import datetime
 
 import streamlit as st
@@ -95,7 +96,6 @@ def build_feature_table(df_raw: pd.DataFrame) -> pd.DataFrame:
     """
     df = df_raw.copy()
 
-    # If couponUsed is missing for some rows, keep it as NaN
     if "couponUsed" not in df.columns:
         df["couponUsed"] = np.nan
 
@@ -232,7 +232,7 @@ st.markdown(
     **Azure Cosmos DB (NoSQL)** and Python.
 
     **Business question:**  
-    > Given information about a sale (basket, customer, store, date/time),  
+    > Given information about a sale (basket, customer, store, and time),  
     > what is the probability that the customer uses a coupon?
 
     The app demonstrates:
@@ -411,7 +411,7 @@ with tab_inference:
         The deployed model is a **scikit-learn pipeline** that predicts:
 
         > The probability that a given sale will use a coupon  
-        > (i.e., `P(couponUsed = 1 | sale information)`)
+        > (i.e., `P(couponUsed = 1 | transaction information)`)
 
         This section has two parts:
         - Batch evaluation on historical data
@@ -480,50 +480,124 @@ with tab_inference:
 
     st.markdown("### 4.2 What-If Scenario: Predict Coupon Usage for a Single Sale")
 
+    # Build df_model to derive realistic ranges and categories
     df_sales = load_sales_data()
-    df_model_preview = build_feature_table(df_sales)
+    df_model = build_feature_table(df_sales)
+    df_model.replace([np.inf, -np.inf], np.nan, inplace=True)
 
-    # Get categorical options from data (fallbacks if empty)
+    # Categorical options from actual data (with fallbacks)
     store_locations = sorted(
-        df_sales["storeLocation"].dropna().unique().tolist()
-    ) if "storeLocation" in df_sales.columns else []
+        df_model["storeLocation"].dropna().unique().tolist()
+    ) if "storeLocation" in df_model.columns else []
     purchase_methods = sorted(
-        df_sales["purchaseMethod"].dropna().unique().tolist()
-    ) if "purchaseMethod" in df_sales.columns else []
+        df_model["purchaseMethod"].dropna().unique().tolist()
+    ) if "purchaseMethod" in df_model.columns else []
     genders = sorted(
-        df_model_preview["cust_gender"].dropna().unique().tolist()
-    ) if "cust_gender" in df_model_preview.columns else []
+        df_model["cust_gender"].dropna().unique().tolist()
+    ) if "cust_gender" in df_model.columns else []
 
     if not store_locations:
-        store_locations = ["Downtown", "Airport", "Suburban"]
+        store_locations = ["Denver", "Seattle", "London", "Austin", "New York", "San Diego"]
     if not purchase_methods:
-        purchase_methods = ["Online", "In store", "Phone"]
+        purchase_methods = ["Online", "Phone", "In store"]
     if not genders:
-        genders = ["M", "F", "Other"]
+        genders = ["M", "F"]
+
+    # Numeric ranges based on actual data
+    def num_range(col_name, default_min, default_max, default_val):
+        if col_name in df_model.columns:
+            series = df_model[col_name].dropna()
+            if not series.empty:
+                return float(series.min()), float(series.max()), float(series.median())
+        return default_min, default_max, default_val
+
+    amt_min, amt_max, amt_med = num_range("total_amount", 0.0, 10000.0, 1000.0)
+    items_min, items_max, items_med = num_range("n_items", 1.0, 100.0, 20.0)
+    uniq_min, uniq_max, uniq_med = num_range("n_unique_items", 1.0, 10.0, 4.0)
+    age_min, age_max, age_med = num_range("cust_age", 18.0, 80.0, 40.0)
+    sat_min, sat_max, sat_med = num_range("cust_satisfaction", 1.0, 5.0, 4.0)
+
+    # Modes for time features
+    def mode_or_default(col_name, default):
+        if col_name in df_model.columns:
+            series = df_model[col_name].dropna()
+            if not series.empty:
+                return int(series.mode()[0])
+        return default
+
+    default_month = mode_or_default("sale_month", 6)
+    default_dow = mode_or_default("sale_dayofweek", 3)
+    default_hour = mode_or_default("sale_hour", 12)
+    default_year = mode_or_default("sale_year", 2015)
 
     with st.form("manual_prediction_form"):
-        st.markdown("**Sale context**")
-        sale_date = st.date_input("Sale date")
-        sale_time = st.time_input("Sale time")
-
         st.markdown("**Customer profile**")
-        cust_age = st.number_input("Customer age", min_value=15, max_value=100, value=35)
-        cust_satisfaction = st.slider("Customer satisfaction (1–5)", 1, 5, value=4)
+        cust_age = st.number_input(
+            "Customer age",
+            min_value=int(age_min),
+            max_value=int(age_max),
+            value=int(age_med),
+        )
+        cust_satisfaction = st.slider(
+            "Customer satisfaction (1–5)",
+            min_value=int(sat_min),
+            max_value=int(sat_max),
+            value=int(sat_med),
+        )
         cust_gender = st.selectbox("Customer gender", genders)
 
         st.markdown("**Transaction details**")
-        total_amount = st.number_input("Total basket amount", min_value=0.0, value=50.0, step=1.0)
-        n_items = st.number_input("Total quantity of items", min_value=1, value=3, step=1)
-        n_unique_items = st.number_input("Number of different items", min_value=1, value=2, step=1)
+        total_amount = st.number_input(
+            "Total basket amount",
+            min_value=float(amt_min),
+            max_value=float(amt_max),
+            value=float(amt_med),
+            step=10.0,
+        )
+        n_items = st.number_input(
+            "Total quantity of items",
+            min_value=int(items_min),
+            max_value=int(items_max),
+            value=int(items_med),
+            step=1,
+        )
+        n_unique_items = st.number_input(
+            "Number of different items",
+            min_value=int(uniq_min),
+            max_value=int(uniq_max),
+            value=int(uniq_med),
+            step=1,
+        )
 
+        st.markdown("**Store & channel**")
         store_location = st.selectbox("Store location", store_locations)
         purchase_method = st.selectbox("Purchase method", purchase_methods)
+
+        st.markdown("**Time of sale**")
+        sale_month = st.slider(
+            "Month of sale (1 = Jan, 12 = Dec)",
+            min_value=1,
+            max_value=12,
+            value=int(default_month),
+        )
+        sale_dayofweek = st.slider(
+            "Day of week (0 = Monday, 6 = Sunday)",
+            min_value=0,
+            max_value=6,
+            value=int(default_dow),
+        )
+        sale_hour = st.slider(
+            "Hour of day (0–23)",
+            min_value=0,
+            max_value=23,
+            value=int(default_hour),
+        )
 
         submitted = st.form_submit_button("Estimate coupon usage probability")
 
     if submitted:
         try:
-            sale_dt = datetime.combine(sale_date, sale_time)
+            # Construct a single-row DataFrame with the exact same feature names as training
             single_row = pd.DataFrame([{
                 "total_amount": float(total_amount),
                 "n_items": int(n_items),
@@ -533,10 +607,10 @@ with tab_inference:
                 "storeLocation": store_location,
                 "purchaseMethod": purchase_method,
                 "cust_gender": cust_gender,
-                "sale_year": sale_dt.year,
-                "sale_month": sale_dt.month,
-                "sale_dayofweek": sale_dt.weekday(),
-                "sale_hour": sale_dt.hour,
+                "sale_year": int(default_year),   # any realistic year in the training range
+                "sale_month": int(sale_month),
+                "sale_dayofweek": int(sale_dayofweek),
+                "sale_hour": int(sale_hour),
             }])
 
             prob_coupon = pipeline.predict_proba(single_row)[:, 1][0]
