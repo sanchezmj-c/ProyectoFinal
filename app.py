@@ -4,6 +4,7 @@ import json
 import streamlit as st
 import pandas as pd
 import numpy as np
+import altair as alt
 
 from azure.cosmos import CosmosClient
 import joblib
@@ -203,7 +204,7 @@ def prepare_labeled_data_for_pipeline():
 
 
 # -------------------------------------------------------------------
-# Streamlit layout & typography tweaks
+# Streamlit layout & small typography tweaks
 # -------------------------------------------------------------------
 
 st.set_page_config(
@@ -212,40 +213,30 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Global style: bigger fonts + white background
+# Just bump heading & metric sizes a bit, no color overrides
 st.markdown(
     """
     <style>
-    /* Force white background and dark text */
-    html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"], [data-testid="stSidebar"] {
-        background-color: #FFFFFF !important;
-        color: #111111 !important;
-    }
     .block-container {
         padding-top: 1rem;
         padding-bottom: 1rem;
-        max-width: 1500px;
+        max-width: 1450px;
         margin: 0 auto;
     }
-    /* Base font sizes */
-    html, body, [class*="css"]  {
-        font-size: 20px;
-    }
     h1 {
-        font-size: 2.8rem !important;
+        font-size: 2.4rem !important;
         font-weight: 700 !important;
     }
     h2 {
-        font-size: 2.2rem !important;
+        font-size: 1.9rem !important;
         font-weight: 650 !important;
     }
     h3 {
-        font-size: 1.8rem !important;
+        font-size: 1.6rem !important;
         font-weight: 600 !important;
     }
-    /* Metric cards a bit bigger */
     div[data-testid="stMetricValue"] {
-        font-size: 1.8rem !important;
+        font-size: 1.6rem !important;
         font-weight: 700 !important;
     }
     div[data-testid="stMetricLabel"] {
@@ -261,9 +252,10 @@ st.title("Coupon Usage Prediction – Retail Insights Dashboard")
 
 st.markdown(
     """
-    This dashboard combines **Azure Cosmos DB**, **machine learning models**, and a simple interface
-    to help understand **where coupons are used** and to estimate the **probability of coupon usage**
-    for future transactions.
+    This dashboard connects **Azure Cosmos DB** with **machine learning models** to show:
+    - How often coupons are used and where  
+    - How coupon usage varies over time and across stores  
+    - A predictive model that estimates the probability of coupon usage for a new sale  
     """
 )
 
@@ -309,7 +301,7 @@ with tab_overview:
 
     st.markdown("---")
 
-    # Coupon rate by month
+    # Coupon rate by month (Altair line chart)
     st.subheader("Coupon Usage Over Time (by Month)")
     if {"sale_month", TARGET_COL}.issubset(df_model.columns):
         month_agg = (
@@ -317,8 +309,18 @@ with tab_overview:
             .agg(Coupon_Usage_Rate="mean", Number_of_Transactions="count")
             .reset_index()
         )
-        month_chart = month_agg.set_index("sale_month")[["Coupon_Usage_Rate"]]
-        st.line_chart(month_chart)
+        month_agg["Month"] = month_agg["sale_month"].astype(int)
+
+        line_chart = (
+            alt.Chart(month_agg)
+            .mark_line(point=True)
+            .encode(
+                x=alt.X("Month:O", title="Month"),
+                y=alt.Y("Coupon_Usage_Rate:Q", title="Coupon usage rate"),
+            )
+            .properties(height=300)
+        )
+        st.altair_chart(line_chart, use_container_width=True)
         st.caption(
             "Coupon usage rate by month (1 = January, 12 = December). "
             "Peaks suggest periods where customers are more responsive to promotions."
@@ -326,7 +328,8 @@ with tab_overview:
     else:
         st.info("Cannot compute monthly view – required time fields are missing.")
 
-    st.subheader("Coupon Usage by Store (Top Locations)")
+    # Coupon rate by store (Altair bar chart)
+    st.subheader("Coupon Usage by Store (Top 10 Locations)")
 
     if {"storeLocation", TARGET_COL}.issubset(df_model.columns):
         store_agg = (
@@ -335,10 +338,19 @@ with tab_overview:
             .reset_index()
         )
         store_agg = store_agg.sort_values("Number_of_Transactions", ascending=False).head(10)
-        store_chart = store_agg.set_index("storeLocation")[["Coupon_Usage_Rate"]]
-        st.bar_chart(store_chart)
+
+        bar_chart = (
+            alt.Chart(store_agg)
+            .mark_bar()
+            .encode(
+                x=alt.X("Coupon_Usage_Rate:Q", title="Coupon usage rate"),
+                y=alt.Y("storeLocation:N", sort="-x", title="Store"),
+            )
+            .properties(height=350)
+        )
+        st.altair_chart(bar_chart, use_container_width=True)
         st.caption(
-            "Top stores by volume and their coupon usage rate. "
+            "Top stores by transaction volume and their coupon usage rate. "
             "Locations with higher rates may be more promotion-sensitive."
         )
     else:
@@ -349,9 +361,9 @@ with tab_overview:
         """
         - **Overall usage:** The coupon usage rate gives a baseline for how often customers
           take advantage of promotions.
-        - **Seasonality:** The month-by-month view highlights potential **campaign windows**.
-        - **Store differences:** Variation between stores suggests where targeted discount
-          strategies might be most effective.
+        - **Seasonality:** The month-by-month line chart highlights potential **campaign windows**.
+        - **Store differences:** The store bar chart shows where coupon behavior is stronger or weaker,
+          guiding local or regional strategies.
         """
     )
 
@@ -475,7 +487,6 @@ with tab_data:
                         "max": "Max",
                     }
                 )
-                # Only show columns that exist (fixes KeyError)
                 cols_to_show = [c for c in ["Feature", "Mean", "Std Dev", "Min", "Max"] if c in desc.columns]
                 st.dataframe(desc[cols_to_show])
             else:
@@ -491,8 +502,18 @@ with tab_data:
                         .value_counts()
                         .rename_axis("Store")
                         .to_frame("Number_of_Transactions")
+                        .reset_index()
                     )
-                    st.bar_chart(store_counts)
+                    chart_store = (
+                        alt.Chart(store_counts)
+                        .mark_bar()
+                        .encode(
+                            x=alt.X("Number_of_Transactions:Q", title="Transactions"),
+                            y=alt.Y("Store:N", sort="-x"),
+                        )
+                        .properties(height=300)
+                    )
+                    st.altair_chart(chart_store, use_container_width=True)
                 else:
                     st.info("Store information is not available in this dataset.")
 
@@ -504,8 +525,18 @@ with tab_data:
                         .value_counts()
                         .rename_axis("Channel")
                         .to_frame("Number_of_Transactions")
+                        .reset_index()
                     )
-                    st.bar_chart(channel_counts)
+                    chart_channel = (
+                        alt.Chart(channel_counts)
+                        .mark_bar()
+                        .encode(
+                            x=alt.X("Number_of_Transactions:Q", title="Transactions"),
+                            y=alt.Y("Channel:N", sort="-x"),
+                        )
+                        .properties(height=300)
+                    )
+                    st.altair_chart(chart_channel, use_container_width=True)
                 else:
                     st.info("Channel information is not available in this dataset.")
 
@@ -519,18 +550,17 @@ with tab_data:
                         avg_n_items=("n_items", "mean"),
                         avg_n_unique_items=("n_unique_items", "mean"),
                     )
-                    .rename(index={0: "No coupon used", 1: "Coupon used"})
                     .reset_index()
                 )
-                agg = agg.rename(
+                agg["CouponUsage"] = agg[TARGET_COL].map({0: "No coupon used", 1: "Coupon used"})
+                agg_pretty = agg.rename(
                     columns={
-                        "index": "CouponUsage",
                         "avg_total_amount": "Average Basket Value",
                         "avg_n_items": "Average Number of Items",
                         "avg_n_unique_items": "Average Number of Distinct Products",
                     }
-                )
-                st.dataframe(agg.set_index("CouponUsedFlag") if "CouponUsedFlag" in agg.columns else agg)
+                )[["CouponUsage", "Average Basket Value", "Average Number of Items", "Average Number of Distinct Products"]]
+                st.dataframe(agg_pretty.set_index("CouponUsage"))
                 st.caption(
                     "Comparison of basket characteristics for transactions with and without coupon usage."
                 )
@@ -539,13 +569,22 @@ with tab_data:
 
             st.markdown("#### Coupon Usage Over Time (Filtered Subset)")
             if {"sale_month", TARGET_COL}.issubset(df_filt.columns):
-                month_agg = (
+                month_agg_f = (
                     df_filt.groupby("sale_month")[TARGET_COL]
                     .agg(Coupon_Usage_Rate="mean", Number_of_Transactions="count")
                     .reset_index()
                 )
-                month_chart = month_agg.set_index("sale_month")[["Coupon_Usage_Rate"]]
-                st.line_chart(month_chart)
+                month_agg_f["Month"] = month_agg_f["sale_month"].astype(int)
+                chart_month_f = (
+                    alt.Chart(month_agg_f)
+                    .mark_line(point=True)
+                    .encode(
+                        x=alt.X("Month:O", title="Month"),
+                        y=alt.Y("Coupon_Usage_Rate:Q", title="Coupon usage rate"),
+                    )
+                    .properties(height=280)
+                )
+                st.altair_chart(chart_month_f, use_container_width=True)
             else:
                 st.info("Cannot compute monthly trend – missing date or target information.")
 
@@ -556,23 +595,18 @@ with tab_data:
                     .mean()
                     .reset_index()
                 )
-                pivot_store_month = store_month_agg.pivot(
-                    index="sale_month",
-                    columns="storeLocation",
-                    values=TARGET_COL,
-                )
-                if pivot_store_month.shape[1] > 10:
-                    top_stores = (
-                        df_filt.groupby("storeLocation")[TARGET_COL]
-                        .count()
-                        .sort_values(ascending=False)
-                        .head(10)
-                        .index
-                        .tolist()
+                store_month_agg["Month"] = store_month_agg["sale_month"].astype(int)
+                chart_store_month = (
+                    alt.Chart(store_month_agg)
+                    .mark_line()
+                    .encode(
+                        x=alt.X("Month:O", title="Month"),
+                        y=alt.Y(f"{TARGET_COL}:Q", title="Coupon usage rate"),
+                        color=alt.Color("storeLocation:N", title="Store"),
                     )
-                    pivot_store_month = pivot_store_month[top_stores]
-
-                st.line_chart(pivot_store_month)
+                    .properties(height=320)
+                )
+                st.altair_chart(chart_store_month, use_container_width=True)
                 st.caption(
                     "Each line represents a store’s coupon usage rate over the months, "
                     "within the selected filter context."
@@ -593,18 +627,30 @@ with tab_imbalance:
 
     if TARGET_COL in df_sales.columns:
         vc = df_sales[TARGET_COL].value_counts(dropna=False)
-        vc = vc.rename(index={0: "No coupon used (0)", 1: "Coupon used (1)"})
+        vc_named = vc.rename(index={0: "No coupon used (0)", 1: "Coupon used (1)"})
+        df_vc = vc_named.reset_index().rename(
+            columns={"index": "CouponUsageFlag", TARGET_COL: "Number_of_Transactions"}
+        )
 
         st.markdown("#### Distribution of Coupon Usage Flag (Full Raw Data)")
-        st.dataframe(vc.to_frame("Number_of_Transactions"))
+        st.dataframe(df_vc, use_container_width=True)
 
-        st.bar_chart(vc)
+        chart_vc = (
+            alt.Chart(df_vc)
+            .mark_bar()
+            .encode(
+                x=alt.X("CouponUsageFlag:N", title="Coupon usage flag"),
+                y=alt.Y("Number_of_Transactions:Q", title="Number of transactions"),
+            )
+            .properties(height=300)
+        )
+        st.altair_chart(chart_vc, use_container_width=True)
 
         st.markdown(
             """
             The dataset is **imbalanced**:
             - Most transactions fall under “no coupon used”.
-            - A smaller proportion correspond to “coupon used”.
+            - A smaller proportion corresponds to “coupon used”.
 
             During modeling, this imbalance was addressed by:
             - Adjusting **class weights** in the models.
