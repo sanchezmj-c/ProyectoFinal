@@ -227,81 +227,159 @@ def prepare_labeled_data_for_pipeline():
 
 
 # -------------------------------------------------------------------
-# Streamlit page configuration
+# Streamlit page configuration + simple CSS for bigger look
 # -------------------------------------------------------------------
 
 st.set_page_config(
-    page_title="Coupon Usage Prediction – Cosmos DB & Machine Learning",
+    page_title="Coupon Usage Prediction – Cosmos DB & ML",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-st.title("Coupon Usage Prediction Dashboard")
+# Make main area wider and headers slightly bigger (for presentation)
+st.markdown(
+    """
+    <style>
+    .block-container {
+        padding-top: 1rem;
+        padding-bottom: 1rem;
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+    h1 {
+        font-size: 2.4rem !important;
+    }
+    h2 {
+        font-size: 1.9rem !important;
+    }
+    h3 {
+        font-size: 1.4rem !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.title("Coupon Usage Prediction – Retail Insights Dashboard")
 
 st.markdown(
     """
-    This dashboard showcases an end-to-end **machine learning solution** built on:
-    - **Azure Cosmos DB (NoSQL)** for operational sales data  
-    - **Python, scikit-learn, LightGBM & Keras** for modeling  
-    - **Streamlit** for interactive reporting and inference  
-
-    **Business question:**  
-    > Given information about a sale (basket, customer, store, and timing),  
-    > what is the probability that the customer uses a coupon?
-
-    The app demonstrates:
-    - Real-time data access from Cosmos DB  
-    - Handling an **imbalanced classification problem**  
-    - Comparison of 5 models  
-    - Deployment of the **best sklearn model** on a compact feature set  
+    This dashboard combines **Azure Cosmos DB**, **machine learning models**, and an interactive
+    interface to help retail stakeholders understand **when coupons are used** and how likely
+    a sale is to use a coupon.
     """
 )
 
-tab_data, tab_imbalance, tab_models, tab_inference = st.tabs(
-    ["Data Overview & EDA", "Target Balance", "Model Performance", "Deployed Model & Predictions"]
+tab_overview, tab_data, tab_imbalance, tab_models, tab_inference = st.tabs(
+    [
+        "Executive Overview",
+        "Detailed EDA & Filters",
+        "Target Balance",
+        "Model Performance",
+        "Deployed Model & What-If",
+    ]
 )
 
 # -------------------------------------------------------------------
-# Tab 1 – Data Overview & EDA (with filters & timelines)
+# Tab 1 – Executive Overview (KPI tiles + key charts)
 # -------------------------------------------------------------------
 
-with tab_data:
-    st.subheader("1. Data Overview, Filters & Exploratory Analysis")
+with tab_overview:
+    st.subheader("1. Executive Overview – Key Metrics & Trends")
 
     try:
         df_sales = load_sales_data()
-        st.success(f"Connected to Cosmos DB. Retrieved **{len(df_sales)}** sales documents.")
-        st.markdown("#### Raw sales documents (sample)")
-        st.dataframe(df_sales.head(), use_container_width=True)
+        df_model = build_feature_table(df_sales)
     except Exception as e:
-        st.error(f"Error loading data from Cosmos DB: {e}")
+        st.error(f"Error loading or processing data from Cosmos DB: {e}")
         st.stop()
 
+    n_tx = len(df_model)
+    overall_coupon_rate = df_model[TARGET_COL].mean() if n_tx > 0 else 0.0
+    n_stores = df_model["storeLocation"].nunique() if "storeLocation" in df_model.columns else 0
+    avg_basket = df_model["total_amount"].mean() if "total_amount" in df_model.columns else 0.0
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Transactions (modeled)", f"{n_tx:,}")
+    with col2:
+        st.metric("Overall Coupon Usage Rate", f"{overall_coupon_rate*100:,.1f}%")
+    with col3:
+        st.metric("Number of Stores", f"{n_stores}")
+    with col4:
+        st.metric("Average Basket Value", f"${avg_basket:,.2f}")
+
+    st.markdown("---")
+
+    # Coupon rate by month
+    st.markdown("### Coupon Usage Over Time (by Month)")
+    if {"sale_month", TARGET_COL}.issubset(df_model.columns):
+        month_agg = (
+            df_model.groupby("sale_month")[TARGET_COL]
+            .agg(coupon_rate="mean", n_sales="count")
+            .reset_index()
+        )
+        month_agg_display = month_agg.set_index("sale_month")[["coupon_rate"]]
+        st.line_chart(month_agg_display)
+        st.caption(
+            "Coupon usage rate by month. Peaks indicate periods where customers are more responsive "
+            "to promotions (e.g., seasonality, campaigns)."
+        )
+    else:
+        st.info("Cannot compute monthly view – missing `sale_month` or target.")
+
+    st.markdown("### Coupon Usage by Store (Top Locations)")
+
+    if {"storeLocation", TARGET_COL}.issubset(df_model.columns):
+        store_agg = (
+            df_model.groupby("storeLocation")[TARGET_COL]
+            .agg(coupon_rate="mean", n_sales="count")
+            .reset_index()
+        )
+        # Focus on stores with enough volume
+        store_agg = store_agg.sort_values("n_sales", ascending=False).head(10)
+        store_agg_display = store_agg.set_index("storeLocation")[["coupon_rate"]]
+        st.bar_chart(store_agg_display)
+        st.caption(
+            "Top stores by volume and their coupon usage rate. "
+            "High coupon-rate stores may be more promotion-sensitive or have more aggressive discount strategies."
+        )
+    else:
+        st.info("Cannot compute store view – missing `storeLocation` or target.")
+
+    st.markdown("### Quick Takeaways")
     st.markdown(
         """
-        Each document represents a **sale transaction** with:
-        - Items purchased (name, price, quantity)  
-        - Embedded customer demographics  
-        - Store location and purchase method  
-        - The flag **`couponUsed`** indicating whether a coupon was applied.  
+        - **How often are coupons used overall?** The overall coupon rate indicates the baseline
+          customer response to promotions.
+        - **Which periods or stores respond more to coupons?** Spikes by month or specific stores
+          highlight **where discount strategies are most effective**.
+        - These high-level insights guide **where to deepen analysis** in the following tabs
+          (filters, model performance, and what-if scenarios).
         """
     )
 
-    st.markdown("#### Engineered feature table (used for modeling)")
+# -------------------------------------------------------------------
+# Tab 2 – Detailed EDA & Filters
+# -------------------------------------------------------------------
+
+with tab_data:
+    st.subheader("2. Detailed EDA with Filters")
 
     try:
+        df_sales = load_sales_data()
         df_model = build_feature_table(df_sales)
-        st.write(f"Feature table rows after cleaning: **{len(df_model)}**")
+        st.success(f"Feature table rows after cleaning: **{len(df_model)}**")
     except Exception as e:
-        st.error(f"Error building feature table: {e}")
+        st.error(f"Error loading or processing data from Cosmos DB: {e}")
         df_model = None
 
     if df_model is None or df_model.empty:
         st.warning("Feature table is empty; cannot perform EDA.")
     else:
         # ---------------- Filters ----------------
-        st.markdown("##### Filters for EDA (subset of data)")
+        st.markdown("##### Filters")
 
-        # Prepare filter options
         stores_all = (
             sorted(df_model["storeLocation"].dropna().unique().tolist())
             if "storeLocation" in df_model.columns
@@ -329,7 +407,6 @@ with tab_data:
                     "Store location",
                     options=stores_all,
                     default=stores_all,
-                    help="Filter EDA charts by selected stores.",
                 )
 
             with col_f2:
@@ -337,7 +414,6 @@ with tab_data:
                     "Purchase method",
                     options=methods_all,
                     default=methods_all,
-                    help="Filter EDA charts by selected channels.",
                 )
 
             with col_f3:
@@ -347,7 +423,6 @@ with tab_data:
                     max_value=int(default_month_max),
                     value=(int(default_month_min), int(default_month_max)),
                     step=1,
-                    help="Filter EDA charts by sale month.",
                 )
 
         # Apply filters
@@ -366,12 +441,11 @@ with tab_data:
         st.markdown(
             f"Filtered subset: **{len(df_filt)}** rows (out of {len(df_model)} total after cleaning)."
         )
-        st.dataframe(df_filt.head(), use_container_width=True)
+        st.dataframe(df_filt.head(20), use_container_width=True)
 
         if df_filt.empty:
             st.warning("No rows match the selected filters. Adjust filters to see EDA.")
         else:
-            # ----- Numeric stats on filtered subset -----
             st.markdown("##### Descriptive statistics (numeric features, filtered subset)")
             num_cols_for_desc = ["total_amount", "n_items", "n_unique_items", "cust_age"]
             num_cols_for_desc = [c for c in num_cols_for_desc if c in df_filt.columns]
@@ -423,34 +497,29 @@ with tab_data:
                 st.dataframe(agg)
                 st.caption(
                     "These averages are computed on the filtered subset. "
-                    "They help compare basket characteristics between transactions with and without coupons."
+                    "They help compare basket characteristics between transactions "
+                    "with and without coupons."
                 )
             else:
                 st.info(f"Column `{TARGET_COL}` not found in feature table.")
 
-            # ----- Timeline of coupon usage by month -----
+            # Timeline: coupon rate by month on filtered subset
             st.markdown("##### Timeline of coupon usage by month (filtered subset)")
-
             if {"sale_month", TARGET_COL}.issubset(df_filt.columns):
                 month_agg = (
                     df_filt.groupby("sale_month")[TARGET_COL]
                     .agg(coupon_rate="mean", n_sales="count")
                     .reset_index()
                 )
-                # Simple line chart of coupon rate
                 month_agg_display = month_agg.set_index("sale_month")[["coupon_rate"]]
                 st.line_chart(month_agg_display)
-                st.caption(
-                    "Coupon rate = average of `couponUsed` per month, on the filtered subset."
-                )
             else:
                 st.info("Cannot compute monthly timeline; missing `sale_month` or target.")
 
-            # ----- Timeline by month and store -----
+            # Timeline by month and store
             st.markdown("##### Coupon usage by month and store (coupon rate)")
 
             if {"sale_month", "storeLocation", TARGET_COL}.issubset(df_filt.columns):
-                # Group by month and store, then pivot to wide format for multi-line chart
                 store_month_agg = (
                     df_filt.groupby(["sale_month", "storeLocation"])[TARGET_COL]
                     .mean()
@@ -461,7 +530,6 @@ with tab_data:
                     columns="storeLocation",
                     values=TARGET_COL,
                 )
-                # For readability, limit to a reasonable number of stores
                 if pivot_store_month.shape[1] > 10:
                     top_stores = (
                         df_filt.groupby("storeLocation")[TARGET_COL]
@@ -484,11 +552,11 @@ with tab_data:
                 )
 
 # -------------------------------------------------------------------
-# Tab 2 – Target Balance
+# Tab 3 – Target Balance
 # -------------------------------------------------------------------
 
 with tab_imbalance:
-    st.subheader("2. Target Balance – How Often Are Coupons Used?")
+    st.subheader("3. Target Balance – How Often Are Coupons Used?")
 
     df_sales = load_sales_data()
 
@@ -515,11 +583,11 @@ with tab_imbalance:
         st.warning(f"Column `{TARGET_COL}` not found; target balance cannot be displayed.")
 
 # -------------------------------------------------------------------
-# Tab 3 – Model Performance (5 models)
+# Tab 4 – Model Performance (5 models)
 # -------------------------------------------------------------------
 
 with tab_models:
-    st.subheader("3. Model Performance – Validation & Test Results")
+    st.subheader("4. Model Performance – Validation & Test Results")
 
     results_json = load_model_results()
     if results_json is None:
@@ -528,53 +596,24 @@ with tab_models:
         baseline = pd.DataFrame(results_json.get("baseline", []))
         improved = results_json.get("improved_best_sklearn", None)
 
-        st.markdown("### 3.1 Comparison of Models (Validation Set, Best Threshold per Model)")
-        st.write(
-            """
-            The table below summarizes **validation-set performance** for the 5 candidate models,
-            each evaluated at its **own best threshold** (selected to maximize F1 on the validation set):
-
-            - Logistic Regression (sklearn)  
-            - Random Forest (sklearn, lighter configuration)  
-            - MLP (sklearn)  
-            - LightGBM  
-            - MLP (Keras, trained locally with GPU – comparison only)  
-            """
-        )
+        st.markdown("### 4.1 Comparison of Models (Validation, Best Threshold per Model)")
         st.dataframe(baseline, use_container_width=True)
 
-        st.markdown("### 3.2 Deployed Model – Best sklearn Model (Reduced Features)")
+        st.markdown("### 4.2 Deployed Model – Best sklearn Model (Reduced Features)")
 
         if improved is not None:
             col1, col2 = st.columns(2)
             with col1:
-                st.markdown("**Validation metrics (at model's best threshold)**")
+                st.markdown("**Validation metrics (model's best threshold)**")
                 st.json(improved["baseline"])
             with col2:
                 st.markdown("**Test metrics (same threshold, unseen data)**")
                 st.json(improved["improved"])
-
-            st.markdown(
-                f"""
-                The deployed model is the **best sklearn model on the reduced feature set**:
-                **{improved['model']}**.
-
-                For this model:
-                - The validation-set threshold was tuned to maximize F1 for coupon usage.  
-                - The same threshold was then applied to the test set to measure **generalization**.  
-
-                All models share the same input features:
-                - Basket size and value  
-                - Customer age and gender  
-                - Store location and purchase channel  
-                - Month of the sale  
-                """
-            )
         else:
             st.info("Improved metrics for the best sklearn model were not found in `model_results.json`.")
 
         # Confusion matrices on current Cosmos DB data (for deployed model)
-        st.markdown("### 3.3 Confusion Matrices on Current Cosmos Data (Deployed Model)")
+        st.markdown("### 4.3 Confusion Matrices on Current Cosmos Data")
 
         try:
             pipeline, best_threshold = load_model_and_threshold()
@@ -585,11 +624,9 @@ with tab_models:
             else:
                 y_prob_all = pipeline.predict_proba(X_all)[:, 1]
 
-                # Baseline threshold 0.5 (reference)
                 acc_05, auc_05, prec_05, rec_05, f1_05, cm_05 = compute_metrics(
                     y_all, y_prob_all, 0.5
                 )
-                # Tuned threshold from training
                 acc_t, auc_t, prec_t, rec_t, f1_t, cm_t = compute_metrics(
                     y_all, y_prob_all, best_threshold
                 )
@@ -603,10 +640,6 @@ with tab_models:
                         columns=["Pred 0", "Pred 1"],
                     )
                     st.table(df_cm_05)
-                    st.caption(
-                        f"Accuracy={acc_05:.3f}, Precision={prec_05:.3f}, "
-                        f"Recall={rec_05:.3f}, F1={f1_05:.3f}"
-                    )
 
                 with colB:
                     st.markdown(f"**Deployed threshold = {best_threshold:.2f}**")
@@ -616,24 +649,16 @@ with tab_models:
                         columns=["Pred 0", "Pred 1"],
                     )
                     st.table(df_cm_t)
-                    st.caption(
-                        f"Accuracy={acc_t:.3f}, Precision={prec_t:.3f}, "
-                        f"Recall={rec_t:.3f}, F1={f1_t:.3f}"
-                    )
 
-                st.caption(
-                    f"Confusion matrices computed on {len(y_all)} labeled rows with valid features "
-                    f"from the current Cosmos DB data."
-                )
         except Exception as e:
             st.error(f"Error computing confusion matrices for the deployed model: {e}")
 
 # -------------------------------------------------------------------
-# Tab 4 – Deployed Model & Predictions
+# Tab 5 – Deployed Model & What-If
 # -------------------------------------------------------------------
 
 with tab_inference:
-    st.subheader("4. Deployed Model & Interactive Predictions")
+    st.subheader("5. Deployed Model & What-If Analysis")
 
     st.markdown(
         """
@@ -665,7 +690,7 @@ with tab_inference:
 
     # --- Part A: Batch evaluation on current Cosmos DB data ---
 
-    st.markdown("### 4.1 Performance on Current Cosmos DB Data")
+    st.markdown("### 5.1 Performance on Current Cosmos DB Data")
 
     try:
         X_all, y_all, n_total, n_valid_feat = prepare_labeled_data_for_pipeline()
@@ -709,13 +734,9 @@ with tab_inference:
         )
         st.table(df_cm)
 
-        st.caption(
-            f"Evaluation based on {len(y_all)} labeled rows with valid features from Cosmos DB."
-        )
-
     # --- Part B: Manual “what-if” prediction form ---
 
-    st.markdown("### 4.2 What-If Scenario – Predict Coupon Usage for a Single Sale")
+    st.markdown("### 5.2 What-If Scenario – Predict Coupon Usage for a Single Sale")
 
     # Build df_model to derive realistic ranges and categories
     try:
@@ -816,7 +837,6 @@ with tab_inference:
 
     if submitted:
         try:
-            # Construct single-row DataFrame with exactly SELECTED_FEATURES
             single_row = pd.DataFrame([{
                 "total_amount": float(total_amount_val),
                 "n_items": int(n_items_val),
@@ -840,9 +860,5 @@ with tab_inference:
             else:
                 st.info("Model decision: **Coupon usage unlikely (class 0).**")
 
-            st.caption(
-                "This prediction uses the same trained pipeline as in the model evaluation. "
-                "Training and threshold tuning were done offline; this app only performs inference."
-            )
         except Exception as e:
             st.error(f"Error computing manual prediction: {e}")
